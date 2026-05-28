@@ -45,16 +45,19 @@ export function pickCase(roomNum) {
 
 // ── MAIN FETCH ────────────────────────────────────────────────────────────
 export async function fetchCaseClues(caseName, spotsPool, roomNum) {
+  // 1. Return from session cache instantly
   if (sessionCache[caseName]) {
     console.log(`[CCF] Cache hit: ${caseName}`)
     return assignToSpots(sessionCache[caseName], spotsPool)
   }
 
+  // 2. Try seeded first if no Gemini key
   if (!GEMINI_KEY) {
     console.log(`[CCF] No Gemini key — using seeded for: ${caseName}`)
     return loadSeeded(caseName, spotsPool, roomNum)
   }
 
+  // 3. Try Gemini with retry + fallback model
   try {
     const data = await fetchFromGeminiWithRetry(caseName)
     sessionCache[caseName] = data
@@ -66,18 +69,26 @@ export async function fetchCaseClues(caseName, spotsPool, roomNum) {
 }
 
 function loadSeeded(caseName, spotsPool, roomNum) {
+  console.log(`[CCF] Loading seeded case: "${caseName}" room ${roomNum}`)
   const seeded = getSeededCase(roomNum, caseName)
+
   if (seeded) {
+    console.log(`[CCF] Seeded found: ${seeded.clues.length} clues`)
     sessionCache[caseName] = seeded
     return assignToSpots(seeded, spotsPool)
   }
+
+  // Last resort — try all rooms if roomNum mismatch
   for (let r = 1; r <= 3; r++) {
     const found = getSeededCase(r, caseName)
     if (found) {
+      console.log(`[CCF] Seeded found in room ${r} (roomNum was ${roomNum})`)
       sessionCache[caseName] = found
       return assignToSpots(found, spotsPool)
     }
   }
+
+  console.warn(`[CCF] No seeded match for "${caseName}" — using generic fallback`)
   const generic = buildGenericFallback(caseName)
   sessionCache[caseName] = generic
   return assignToSpots(generic, spotsPool)
@@ -86,7 +97,7 @@ function loadSeeded(caseName, spotsPool, roomNum) {
 // ── ASSIGN CLUES TO SPOTS ─────────────────────────────────────────────────
 function assignToSpots(caseData, spotsPool) {
   const shuffledSpots = shuffleArray([...spotsPool])
-  const chosen = shuffledSpots.slice(0, 10)
+  const chosen = shuffledSpots.slice(0, 7)
   const shuffledClues = shuffleArray([...caseData.clues])
 
   const clueSpotIds = chosen.map(s => s.id)
@@ -118,7 +129,9 @@ const MODELS = [
 
 async function fetchFromGeminiWithRetry(caseName) {
   let lastError
+
   for (const model of MODELS) {
+    // Try each model up to 2 times with backoff
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const data = await fetchFromGemini(caseName, model)
@@ -128,34 +141,36 @@ async function fetchFromGeminiWithRetry(caseName) {
         lastError = err
         const is429 = err.message.includes('429')
         console.warn(`[CCF] ${model} attempt ${attempt} failed: ${err.message}`)
+
         if (is429 && attempt === 1) {
+          // Wait before retry — exponential backoff
           const wait = model === MODELS[0] ? 1500 : 800
+          console.log(`[CCF] Rate limited — waiting ${wait}ms before retry`)
           await new Promise(r => setTimeout(r, wait))
         } else if (!is429) {
+          // Non-rate-limit error — skip retrying this model
           break
         }
       }
     }
   }
+
   throw lastError || new Error('All Gemini models failed')
 }
 
 async function fetchFromGemini(caseName, model = 'gemini-2.0-flash') {
-  const prompt = `You are writing fragments of a dark, atmospheric investigation game. The player is physically searching a room, and each clue they find is a piece of an unfolding story — a real cold case they must piece together themselves.
+  const prompt = `You are a writer for a dark atmospheric cold case investigation game.
+The player is secretly investigating: "${caseName}"
 
-The case is: "${caseName}"
-
-The CASE NAME, victim name, location name, and any identifying proper nouns must NEVER appear in any clue text.
-
-Write in second person. The player is discovering these fragments in a dimly lit room — finding notes tucked in drawers, photographs behind mirrors, items left behind. Each clue should feel like a piece of a story slowly assembling itself. Atmospheric, eerie, curious. Not a list of facts — a narrative the player is stepping into.
+Generate a complete case package. The CASE NAME must NEVER appear in any clue text.
 
 Return ONLY raw valid JSON, no markdown, no backticks, no explanation.
 
 {
   "clues": [
     {
-      "fact": "Second-person discovery. Written as if the player physically finds this in the room — a document, object, photograph, note, or detail they observe. Atmospheric and specific. Never names the case. 2-4 sentences.",
-      "source": "Real or plausible source — Publication, Year",
+      "fact": "Second-person clue text. Never name the case, victim, or location. Write as physical evidence found. 1-3 sentences.",
+      "source": "Real source — Publication, Year",
       "ref": "domain.com/path",
       "isReal": true,
       "falseExplanation": null
@@ -170,19 +185,12 @@ Return ONLY raw valid JSON, no markdown, no backticks, no explanation.
 }
 
 RULES:
-- Exactly 10 clues: 6 isReal:true, 4 isReal:false
-- Story arc across the 10 clues:
-    1-2: atmosphere and setting — who these people were, the world they inhabited
-    3-4: the incident — what happened, the moment things broke
-    5-6: the investigation begins — what was found, what was noticed
-    7-8: contradiction and suspicion — what didn't add up, who behaved strangely
-    9: the false trail deepens — the most convincing wrong lead
-    10: the haunting unanswered note — what was never explained, never recovered, never understood
-- False clues (4 total) must be woven naturally into the arc — they should feel as real as the real ones
-- Each false clue needs a falseExplanation string explaining why it misled
+- Exactly 7 clues: 5 isReal:true, 2 isReal:false
+- False clues need a falseExplanation string explaining the deception
 - Real clues: falseExplanation must be null
-- NEVER name victim, killer, location, or case in any clue
-- Second person only ("You find...", "You notice...", "Tucked behind...", "The photograph shows...")
+- Arc: clues 1-2 background, 3-4 incident, 5-6 suspects, 7 haunting unanswered note
+- NEVER name victim, killer, location, or case name in any clue
+- Second person only ("You find...", "You notice...")
 - Exactly 1 theory isCorrect:true
 - Return ONLY the JSON object, nothing else`
 
@@ -193,7 +201,7 @@ RULES:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.75, maxOutputTokens: 4000 },
+        generationConfig: { temperature: 0.72, maxOutputTokens: 3000 },
       }),
     }
   )
@@ -208,11 +216,11 @@ RULES:
   if (!jsonMatch) throw new Error('No JSON in response')
 
   const parsed = JSON.parse(jsonMatch[0])
-  if (!parsed.clues || parsed.clues.length < 10) throw new Error('Too few clues')
+  if (!parsed.clues || parsed.clues.length < 7) throw new Error('Too few clues')
   if (!parsed.theories || parsed.theories.length < 3) throw new Error('Too few theories')
 
   return {
-    clues: parsed.clues.slice(0, 10),
+    clues: parsed.clues.slice(0, 7),
     theories: parsed.theories.slice(0, 3),
     correctTheoryExplanation: parsed.correctTheoryExplanation || '',
   }
@@ -222,16 +230,13 @@ RULES:
 function buildGenericFallback(caseName) {
   return {
     clues: [
-      { fact: "You find a photograph tucked behind the frame of a mirror — a family, unremarkably posed, on an unremarkable day. Someone has circled one face in pencil. The circle is pressed so hard into the paper it nearly tore through.", source: `${caseName} — Case Archives`, ref: "fbi.gov/history/famous-cases", isReal: true, falseExplanation: null },
-      { fact: "A newspaper clipping is folded inside a dictionary, marking a word someone underlined long ago. The clipping describes the beginning. The word they marked was 'vanished.'", source: `${caseName} — Newspaper Archive`, ref: "newspapers.com", isReal: true, falseExplanation: null },
-      { fact: "You find a handwritten calendar on the desk. Three days have been crossed out in red. The days after them are blank — as though whoever kept this diary already knew what was coming, and stopped writing.", source: `${caseName} — Personal Effects`, ref: "loc.gov/collections", isReal: true, falseExplanation: null },
-      { fact: "A sealed envelope is taped beneath the drawer. Inside: a list of names in two columns. One column has been crossed through entirely. The other is untouched. You do not recognise any of them.", source: `${caseName} — Investigative Records`, ref: "courtlistener.com", isReal: true, falseExplanation: null },
-      { fact: "The phone on the desk still works. You check the last number dialled. It connects to nothing — a disconnected line. The call was made at 2:14am. The incident occurred four hours later.", source: `${caseName} — Phone Records`, ref: "pacer.gov", isReal: true, falseExplanation: null },
-      { fact: "A logbook near the door records arrivals and departures in careful handwriting. The night in question shows one entry — a time, a signature, and then a second line scratched over so completely you cannot read what it said.", source: `${caseName} — Location Records`, ref: "nationalarchives.gov.uk", isReal: true, falseExplanation: null },
-      { fact: "You find a typed statement — three pages, signed at the bottom. But the signature does not match the name typed at the top. Someone else signed this. The discrepancy appears in the official file without comment.", source: `${caseName} — Witness Statements`, ref: "fbi.gov/vault", isReal: false, falseExplanation: "The signature discrepancy was a clerical error — a statement signed on behalf of another witness by their attorney. It was noted and explained in a supplementary file that was rarely cross-referenced." },
-      { fact: "A forensic summary pinned to the board claims physical evidence confirmed the suspect's presence. But the summary has no case number, no examining officer, and no chain of custody stamp. Someone printed this and added it to the file.", source: `${caseName} — Forensic Summary`, ref: "nij.ojp.gov", isReal: false, falseExplanation: "This document was a press summary, not an official forensic report. It was included in a journalist's research file that became mixed with official materials during a records transfer." },
-      { fact: "You find a second photograph — taken at the same location, but months earlier. In the background, barely visible, stands a figure facing the camera. The same figure appears in photographs from three separate events that year. No one knows who they are.", source: `${caseName} — Photo Evidence`, ref: "archives.gov", isReal: false, falseExplanation: "The repeated background figure was identified as a local press photographer who routinely covered public events in the area. Their presence was coincidental and they were eliminated from the investigation early on." },
-      { fact: "At the very back of the file, behind everything else, is a single index card. On it, one sentence in different handwriting from everything else in the room: 'We never found out why they came back.' No name. No date. No explanation of what it means.", source: `${caseName} — Cold Case Review`, ref: "fbi.gov/wanted/coldcases", isReal: false, falseExplanation: "This note referred to a separate, unrelated matter in a different case file that was misfiled here. The 'they' it references was never connected to this investigation." },
+      { fact: "You find a photograph with the edges burned. The date on the back has been scratched out — deliberately.", source: `${caseName} — Case Archives`, ref: "fbi.gov/history/famous-cases", isReal: true, falseExplanation: null },
+      { fact: "A handwritten note describes the subject's last known routine. Three days are missing with no explanation.", source: `${caseName} — Investigative Records`, ref: "loc.gov/collections", isReal: true, falseExplanation: null },
+      { fact: "The timeline does not hold. Two witnesses place them in different locations on the same evening.", source: `${caseName} — Witness Statements`, ref: "courtlistener.com", isReal: true, falseExplanation: null },
+      { fact: "Physical evidence was logged, then quietly removed from the official record eighteen months later.", source: `${caseName} — Evidence Log`, ref: "pacer.gov", isReal: true, falseExplanation: null },
+      { fact: "A person of interest was interviewed three times. Each time their story changed in the same small detail.", source: `${caseName} — Interview Transcripts`, ref: "newspapers.com", isReal: true, falseExplanation: null },
+      { fact: "Forensic analysis is said to have confirmed the suspect's presence at the scene — but the report has never been released.", source: `${caseName} — Forensic Report`, ref: "nij.ojp.gov", isReal: false, falseExplanation: "No forensic confirmation was ever made public. This detail was circulated by press but has no documentary basis." },
+      { fact: "You find one final detail that no official report mentions. You don't know what it means. Nobody does. The file simply stops here.", source: `${caseName} — Cold Case Review`, ref: "fbi.gov/wanted/coldcases", isReal: true, falseExplanation: null },
     ],
     theories: [
       { label: "Someone within the victim's immediate circle — with intimate knowledge of their routine and access to their private life — who was never seriously investigated.", isCorrect: true },
