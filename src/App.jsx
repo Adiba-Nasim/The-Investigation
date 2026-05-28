@@ -7,6 +7,7 @@ import RoomScreen from './screens/RoomScreen'
 import TheoryScreen from './screens/TheoryScreen'
 import RevealScreen from './screens/RevealScreen'
 import ProfileScreen from './screens/ProfileScreen'
+import { MusicPlayer } from './components/MusicPlayer'
 
 export default function App() {
   const screen = useGameStore(s => s.screen)
@@ -16,12 +17,15 @@ export default function App() {
 
   return (
     <>
+      {/* Persistent across all screens — must stay mounted to keep audio alive */}
+      <MusicPlayer />
+
       {/* Base screens — mutually exclusive, swap with exit animation */}
       <AnimatePresence mode="wait">
-        {screen === 'landing'  && <LandingScreen  key="landing"  />}
-        {screen === 'auth'     && <AuthScreen      key="auth"     />}
-        {screen === 'door'     && <DoorScreen      key="door"     />}
-        {screen === 'profile'  && <ProfileScreen   key="profile"  />}
+        {screen === 'landing' && <LandingScreen key="landing" />}
+        {screen === 'auth'    && <AuthScreen    key="auth"    />}
+        {screen === 'door'    && <DoorScreen    key="door"    />}
+        {screen === 'profile' && <ProfileScreen key="profile" />}
       </AnimatePresence>
 
       {/* RoomScreen stays mounted while room / theory / reveal are active */}
