@@ -45,7 +45,7 @@ export default function Spot({ spot, found, onClick, delay = 0 }) {
 
         {/* Found tick */}
         {found && (
-          <span className="absolute text-crimson text-[8px] font-bold -top-0.5 -right-0.5">✓</span>
+          <span className="absolute text-crimson text-[8px] font-bold -top-0.5 -right-0.5"></span>
         )}
       </div>
 

@@ -15,8 +15,9 @@ export default function RevealScreen({ onClose }) {
   const falseClues = foundClues.filter(c => c.isReal === false)
 
   const [copied, setCopied] = useState(false)
-  const [capturing, setCapturing] = useState(false)
+  const [shareBlob, setShareBlob] = useState(null)
   const paperRef = useRef(null)
+  const cropRef = useRef(null)
 
   const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -25,40 +26,100 @@ export default function RevealScreen({ onClose }) {
   const stampColor = isCorrect ? (STAMP_COLORS[selectedRoom] || '#293929') : '#8b1a1a'
   const roomLabel = ROOM_LABELS[selectedRoom] || 'Room I'
 
-  const shareText = isCorrect
-    ? `🕵️ I cracked the case on The Investigation.\n\nCase: "${selectedCase}"\nTheory: Confirmed ✓\n\nThink you can solve it? theInvestigation.app`
-    : `🕵️ The false trails got me on The Investigation.\n\nCase: "${selectedCase}"\nTheory: Rejected ✗\n\ntheInvestigation.app`
-
   useEffect(() => { if (user) saveToProfile() }, [])
 
-  async function handleShareImage() {
-    if (!paperRef.current) return
-    setCapturing(true)
-    try {
-      const canvas = await html2canvas(paperRef.current, { backgroundColor: '#e8d9bc', scale: 2, useCORS: true, logging: false })
-      canvas.toBlob(async (blob) => {
-        const file = new File([blob], 'case-file.png', { type: 'image/png' })
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ title: 'Cold Case Files', text: shareText, files: [file] })
-        } else {
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url; a.download = `case-reveal-${Date.now()}.png`; a.click()
-          URL.revokeObjectURL(url)
-        }
-        setCapturing(false)
-      }, 'image/png')
-    } catch (e) { console.error(e); setCapturing(false) }
-  }
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!paperRef.current || !cropRef.current) return
+      const rect = paperRef.current.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) return
 
-  async function handleShareText() {
-    if (navigator.share) {
-      try { await navigator.share({ title: 'The Investigation', text: shareText, url: window.location.href }); return } catch (e) {}
-    }
-    try {
-      await navigator.clipboard.writeText(shareText)
+      const motionEls = paperRef.current.querySelectorAll('[style*="opacity"]')
+      const overrides = []
+      motionEls.forEach(el => {
+        overrides.push({ el, opacity: el.style.opacity, transform: el.style.transform })
+        el.style.opacity = '1'
+        el.style.transform = 'none'
+      })
+
+      try {
+        const full = await html2canvas(paperRef.current, {
+          backgroundColor: '#e8d9bc',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          removeContainer: true,
+        })
+
+        overrides.forEach(({ el, opacity, transform }) => {
+          el.style.opacity = opacity
+          el.style.transform = transform
+        })
+
+        if (full.width === 0 || full.height === 0) return
+
+        const paperTop = paperRef.current.getBoundingClientRect().top
+        const cropBottom = cropRef.current.getBoundingClientRect().top
+        const cropY = Math.round((cropBottom - paperTop) * 2)
+
+        const footerH = 160
+        const final = document.createElement('canvas')
+        final.width = full.width
+        final.height = cropY + footerH
+        const ctx = final.getContext('2d')
+
+        ctx.drawImage(full, 0, 0, full.width, cropY, 0, 0, full.width, cropY)
+
+        ctx.fillStyle = '#151210'
+        ctx.fillRect(0, cropY, full.width, footerH)
+
+        const cx = final.width / 2
+        const line1 = isCorrect
+          ? '🕵️  I cracked the case — The Investigation'
+          : '🕵️  The false trails got me — The Investigation'
+        const line2 = `Case: "${selectedCase}"  ·  ${isCorrect ? 'Theory: Confirmed ' : 'Theory: Rejected ✗'}`
+        const line3 = 'theInvestigation.app'
+
+        ctx.textAlign = 'center'
+        ctx.fillStyle = '#c9a96e'
+        ctx.font = `600 ${final.width * 0.031}px monospace`
+        ctx.fillText(line1, cx, cropY + footerH * 0.30)
+
+        ctx.fillStyle = '#9a8060'
+        ctx.font = `400 ${final.width * 0.026}px monospace`
+        ctx.fillText(line2, cx, cropY + footerH * 0.57)
+
+        ctx.fillStyle = '#5a4a32'
+        ctx.font = `400 ${final.width * 0.023}px monospace`
+        ctx.fillText(line3, cx, cropY + footerH * 0.80)
+
+        final.toBlob((blob) => { if (blob) setShareBlob(blob) }, 'image/png')
+      } catch (e) {
+        console.error(e)
+        overrides.forEach(({ el, opacity, transform }) => {
+          el.style.opacity = opacity
+          el.style.transform = transform
+        })
+      }
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  async function handleShare() {
+    if (!shareBlob) return
+    const file = new File([shareBlob], 'case-file.png', { type: 'image/png' })
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'The Investigation' })
+        setCopied(true); setTimeout(() => setCopied(false), 2500)
+      } catch (e) { /* cancelled */ }
+    } else {
+      const url = URL.createObjectURL(shareBlob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `case-reveal-${Date.now()}.png`; a.click()
+      URL.revokeObjectURL(url)
       setCopied(true); setTimeout(() => setCopied(false), 2500)
-    } catch (e) {}
+    }
   }
 
   return (
@@ -93,7 +154,6 @@ export default function RevealScreen({ onClose }) {
             {isCorrect ? 'CONFIRMED' : 'REJECTED'}
           </motion.div>
 
-          {/* Header — mirrors CaseFileScreen exactly */}
           <p className="font-elite text-[8px] tracking-[0.3em] text-stone-500 uppercase mb-0.5">Cold Case Files</p>
           <p className="font-elite text-[7px] tracking-[0.2em] text-stone-400 uppercase mb-1">{roomLabel}</p>
           <h2 className="font-crimson text-stone-800 leading-tight mb-1" style={{ fontSize: 'clamp(1.4rem, 4vw, 2.2rem)' }}>
@@ -105,12 +165,10 @@ export default function RevealScreen({ onClose }) {
 
           <div className="h-px bg-gradient-to-r from-stone-600 to-transparent opacity-15 mb-4" />
 
-          {/* Theory result line */}
           <p className="font-mono text-[7px] tracking-[0.2em] text-stone-400 uppercase mb-4">
             {isCorrect ? 'Theory Confirmed — Correct Verdict' : 'Theory Rejected — Evidence Misread'}
           </p>
 
-          {/* Correct theory explanation */}
           <p className="font-crimson italic text-stone-600 leading-[1.75] mb-2" style={{ fontSize: '0.95rem' }}>
             {correctTheoryExplanation}
           </p>
@@ -123,7 +181,6 @@ export default function RevealScreen({ onClose }) {
 
           <div className="h-px bg-gradient-to-r from-stone-600 to-transparent opacity-15 mb-4" />
 
-          {/* Real clues */}
           <p className="font-mono text-[7px] tracking-[0.2em] text-stone-400 uppercase mb-4">
             Evidence Collected — {foundClues.length} / 7 &nbsp;·&nbsp; {realClues.length} Real &nbsp;·&nbsp; {falseClues.length} False
           </p>
@@ -149,7 +206,9 @@ export default function RevealScreen({ onClose }) {
             ))}
           </ul>
 
-          {/* False clues */}
+          {/* Crop point — share image footer starts here */}
+          <div ref={cropRef} />
+
           {falseClues.length > 0 && (
             <>
               <div className="h-px bg-gradient-to-r from-stone-600 to-transparent opacity-15 mb-4" />
@@ -186,7 +245,7 @@ export default function RevealScreen({ onClose }) {
             </>
           )}
 
-          {/* Guest nudge */}
+          {/* Guest prompt */}
           {isGuest && (
             <div className="border border-stone-300 px-4 py-3 mb-5 bg-stone-50/50">
               <p className="font-crimson text-stone-600 text-sm mb-2">Register to save this case file to your archive.</p>
@@ -199,41 +258,40 @@ export default function RevealScreen({ onClose }) {
             </div>
           )}
 
-          {/* Saved note */}
+          {/* Saved confirmation — case is auto-saved on mount */}
           {user && (
             <p className="font-mono text-[7px] tracking-[0.2em] uppercase text-center mb-4" style={{ color: 'rgba(45,90,30,0.65)' }}>
-              ✓ Saved to your case archive
+              ✓ Case file saved to your archive
             </p>
           )}
 
-          {/* Footer — mirrors CaseFileScreen exactly */}
+        </div>
+
+        {/* Footer — never captured in share image */}
+        <div className="px-10 pb-8">
           <div className="border-t border-stone-300/50 pt-4">
             <div className="flex justify-between items-center flex-wrap gap-3">
               <span className="font-elite text-[0.72rem] text-stone-400">{today}</span>
               <div className="flex gap-2 flex-wrap">
 
                 <button
-                  onClick={handleShareImage}
-                  disabled={capturing}
-                  className="font-mono text-[7px] tracking-[0.15em] uppercase px-4 py-2.5 border border-stone-400 text-stone-500 hover:bg-stone-700 hover:text-stone-100 hover:border-stone-700 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  onClick={handleShare}
+                  disabled={!shareBlob}
+                  className="font-mono text-[7px] tracking-[0.15em] uppercase px-4 py-2.5 border border-stone-300 text-stone-400 hover:border-stone-500 hover:text-stone-600 transition-all flex items-center gap-1.5 disabled:opacity-40"
                 >
-                  {capturing ? <span className="inline-block w-3 h-3 border border-stone-400 border-t-stone-700 rounded-full animate-spin" /> : null}
-                  {capturing ? 'Capturing…' : 'Save image'}
+                  {!shareBlob
+                    ? <><span className="inline-block w-3 h-3 border border-stone-400 border-t-stone-700 rounded-full animate-spin" />&nbsp;Preparing…</>
+                    : copied ? 'Shared ' : 'Share'
+                  }
                 </button>
 
-                <button
-                  onClick={handleShareText}
-                  className="font-mono text-[7px] tracking-[0.15em] uppercase px-4 py-2.5 border border-stone-300 text-stone-400 hover:border-stone-500 hover:text-stone-600 transition-all"
-                >
-                  {copied ? 'Copied ✓' : 'Share'}
-                </button>
-
+                {/* Archive button — case is already saved, just navigate to profile */}
                 {user && (
                   <button
                     onClick={() => setScreen('profile')}
                     className="font-mono text-[7px] tracking-[0.15em] uppercase px-4 py-2.5 border border-stone-300 text-stone-400 hover:border-stone-500 transition-all"
                   >
-                    Archive
+                    View in Archive →
                   </button>
                 )}
 
@@ -256,8 +314,8 @@ export default function RevealScreen({ onClose }) {
               </div>
             </div>
           </div>
-
         </div>
+
       </motion.div>
     </motion.div>
   )

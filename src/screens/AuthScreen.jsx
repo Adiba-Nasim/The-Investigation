@@ -23,11 +23,12 @@ export default function AuthScreen() {
     if (!email.trim()) return setErr('Please enter your email.')
     if (!password.trim()) return setErr('Please enter a password.')
     setLoading(true)
-    await new Promise(r => setTimeout(r, 400))
+
     const result = isRegister
-      ? register({ name: name.trim(), email: email.trim().toLowerCase(), password })
-      : login({ email: email.trim().toLowerCase(), password })
-    if (result.error) {
+      ? await register({ name: name.trim(), email: email.trim().toLowerCase(), password })
+      : await login({ email: email.trim().toLowerCase(), password })
+
+    if (result?.error) {
       setErr(result.error)
       setLoading(false)
     }
@@ -53,13 +54,12 @@ export default function AuthScreen() {
         style={{ background: 'radial-gradient(ellipse 80% 70% at 50% 50%, transparent 20%, rgba(4,2,2,0.8) 100%)' }}
       />
 
-      {['tl','tr','bl','br'].map(pos => (
-        <div key={pos} className={`absolute w-10 h-10 border-gold/20 border-solid ${
-          pos === 'tl' ? 'top-5 left-5 border-t border-l' :
-          pos === 'tr' ? 'top-5 right-5 border-t border-r' :
-          pos === 'bl' ? 'bottom-5 left-5 border-b border-l' :
-          'bottom-5 right-5 border-b border-r'
-        }`} />
+      {['tl', 'tr', 'bl', 'br'].map(pos => (
+        <div key={pos} className={`absolute w-10 h-10 border-gold/20 border-solid ${pos === 'tl' ? 'top-5 left-5 border-t border-l' :
+            pos === 'tr' ? 'top-5 right-5 border-t border-r' :
+              pos === 'bl' ? 'bottom-5 left-5 border-b border-l' :
+                'bottom-5 right-5 border-b border-r'
+          }`} />
       ))}
 
       <motion.div
@@ -144,7 +144,7 @@ export default function AuthScreen() {
 
           <button
             onClick={() => { setErr(''); setAuthMode(isRegister ? 'login' : 'register') }}
-            className="w-full font-mono text-[7px] tracking-[0.2em] text-muted/50 uppercase transition-colors hover:text-muted"
+            className="w-full font-mono text-[7px] tracking-[0.2em] text-muted/70 uppercase transition-colors hover:text-muted"
           >
             {isRegister ? 'Already have a file? Sign in' : 'No file yet? Register'}
           </button>
@@ -152,7 +152,7 @@ export default function AuthScreen() {
 
         <button
           onClick={() => setScreen('landing')}
-          className="mt-5 w-full font-mono text-[7px] tracking-[0.2em] text-muted/35 uppercase transition-colors hover:text-muted/60"
+          className="mt-5 w-full font-mono text-[11px] tracking-[0.2em] text-gold uppercase transition-colors hover:text-gold/80"
         >
           ← Back
         </button>

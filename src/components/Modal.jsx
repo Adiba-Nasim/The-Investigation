@@ -95,7 +95,7 @@ export default function Modal({ data, onClose, onLog }) {
                 }
               `}
             >
-              {alreadyFound ? 'Already logged ✓' : isClue ? 'Log as evidence →' : 'Move on →'}
+              {alreadyFound ? 'Already logged ' : isClue ? 'Log as evidence →' : 'Move on →'}
             </button>
           </div>
         </motion.div>
