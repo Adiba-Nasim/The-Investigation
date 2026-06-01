@@ -68,9 +68,9 @@ const useGameStore = create((set, get) => ({
     }
 
     return (rows ?? []).map(r => ({
-      caseName:      r.case_name,
-      room:          r.room_id,
-      dateSolved:    r.date_solved,
+      caseName: r.case_name,
+      room: r.room_id,
+      dateSolved: r.date_solved,
       theoryCorrect: r.theory_correct,
       clues: (r.solved_clues ?? [])
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
@@ -83,7 +83,7 @@ const useGameStore = create((set, get) => ({
     if (!session) return
 
     const authUser = session.user
-    const name     = authUser.user_metadata?.name ?? authUser.email
+    const name = authUser.user_metadata?.name ?? authUser.email
 
     const solvedCases = await get().fetchSolvedCases()
     set({ user: { name, email: authUser.email, solvedCases }, isGuest: false, screen: 'door' })
@@ -139,74 +139,70 @@ const useGameStore = create((set, get) => ({
     set({ chosenTheory: theory, caseRevealed: true, screen: 'reveal' })
   },
 
- saveToProfile: async () => {
-  const { user, selectedRoom, selectedCase, selectedCaseId, foundClues, chosenTheory } = get()
-  if (!user) return
+  saveToProfile: async () => {
+    const { user, selectedRoom, selectedCase, selectedCaseId, foundClues, chosenTheory, _saving } = get()
+    if (!user || _saving) return
 
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return
+    set({ _saving: true })
 
-  const dateSolved = new Date().toISOString().split('T')[0]
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { set({ _saving: false }); return }
 
-  // Check DB directly instead of relying on local state
-  const { data: existing } = await supabase
-    .from('solved_cases')
-    .select('id')
-    .eq('user_id', session.user.id)
-    .eq('case_name', selectedCase)
-    .maybeSingle()
+    const dateSolved = new Date().toISOString().split('T')[0]
 
-  if (existing) return  // already saved
+    const { data: existing } = await supabase
+      .from('solved_cases')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .eq('case_name', selectedCase)
+      .maybeSingle()
 
-  // Insert fresh
-  const { data: savedCase, error: caseError } = await supabase
-    .from('solved_cases')
-    .insert({
-      user_id:        session.user.id,
-      case_name:      selectedCase,
-      room_id:        selectedRoom,
-      date_solved:    dateSolved,
-      theory_correct: chosenTheory?.isCorrect || false,
-    })
-    .select('id')
-    .single()
+    if (existing) { set({ _saving: false }); return }
 
-  if (caseError) {
-    console.error('saveToProfile case error:', caseError.message)
-    return
-  }
+    const { data: savedCase, error: caseError } = await supabase
+      .from('solved_cases')
+      .insert({
+        user_id: session.user.id,
+        case_name: selectedCase,
+        room_id: selectedRoom,
+        date_solved: dateSolved,
+        theory_correct: chosenTheory?.isCorrect || false,
+      })
+      .select('id')
+      .single()
 
-  // Save clues
-  if (foundClues.length > 0) {
-    const clueRows = foundClues.map((c, i) => ({
-      solved_case_id: savedCase.id,
-      fact:           c.fact,
-      source:         c.source,
-      is_real:        c.isReal ?? true,
-      sort_order:     i,
-    }))
-
-    const { error: cluesError } = await supabase
-      .from('solved_clues')
-      .insert(clueRows)
-
-    if (cluesError) {
-      console.error('saveToProfile clues error:', cluesError.message)
+    if (caseError) {
+      console.error('saveToProfile case error:', caseError.message)
+      set({ _saving: false })
+      return
     }
-  }
 
-  // Update local store
-  const newEntry = {
-    caseName:      selectedCase,
-    room:          selectedRoom,
-    dateSolved,
-    clues:         foundClues.map(c => ({ fact: c.fact, source: c.source, isReal: c.isReal ?? true })),
-    theoryCorrect: chosenTheory?.isCorrect || false,
-  }
+    if (foundClues.length > 0) {
+      const clueRows = foundClues.map((c, i) => ({
+        solved_case_id: savedCase.id,
+        fact: c.fact,
+        source: c.source,
+        is_real: c.isReal ?? true,
+        sort_order: i,
+      }))
 
-  set(s => ({ user: { ...s.user, solvedCases: [newEntry, ...(s.user.solvedCases ?? [])] } }))
-},
+      const { error: cluesError } = await supabase
+        .from('solved_clues')
+        .insert(clueRows)
 
+      if (cluesError) console.error('saveToProfile clues error:', cluesError.message)
+    }
+
+    const newEntry = {
+      caseName: selectedCase,
+      room: selectedRoom,
+      dateSolved,
+      clues: foundClues.map(c => ({ fact: c.fact, source: c.source, isReal: c.isReal ?? true })),
+      theoryCorrect: chosenTheory?.isCorrect || false,
+    }
+
+    set(s => ({ user: { ...s.user, solvedCases: [newEntry, ...(s.user.solvedCases ?? [])] }, _saving: false }))
+  },
   resetCase: () => {
     const { isGuest } = get()
     set({
