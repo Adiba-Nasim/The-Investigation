@@ -30,6 +30,7 @@ export default function RoomScreen() {
 
   const spots = ROOM_SPOTS[selectedRoom] || SPOTS_R1
   const roomImage = ROOM_IMAGES[selectedRoom] || '/office.webp'
+  const [visitedSpots, setVisitedSpots] = useState(new Set())
 
   const wrapRef = useRef(null)
   const [transform, setTransform] = useState({ x: 0, y: 0, s: 1 })
@@ -107,6 +108,7 @@ export default function RoomScreen() {
   function tapSpot(e, spot) {
     e.stopPropagation()
     if (didDrag.current) return
+    setVisitedSpots(prev => new Set([...prev, spot.id]))
     const isClue = clueSpotIds.includes(spot.id)
     const alreadyFound = foundClues.some(f => f.spotId === spot.id)
     setModal({ spotId: spot.id, label: spot.label, isClue, alreadyFound, fallback: spot.fallback, ...(isClue ? clueMap[spot.id] : {}) })
@@ -132,7 +134,7 @@ export default function RoomScreen() {
       <TopBar
         keyword="Open Investigation"
         clueCount={foundClues.length}
-        onOpenFile={() => {}}
+        onOpenFile={() => { }}
         allFound={foundClues.length === 7}
         hideFileButton={foundClues.length < 7}
       />
@@ -157,8 +159,14 @@ export default function RoomScreen() {
           />
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'radial-gradient(ellipse 85% 75% at 50% 50%, transparent 35%, rgba(13,11,8,0.48) 100%)' }} />
           {spots.map((spot, i) => (
-            <Spot key={spot.id} spot={spot} found={foundClues.some(f => f.spotId === spot.id)} onClick={(e) => tapSpot(e, spot)} delay={i} />
-          ))}
+            <Spot
+              key={spot.id}
+              spot={spot}
+              found={visitedSpots.has(spot.id)}
+              isClue={clueSpotIds.includes(spot.id)}
+              onClick={(e) => tapSpot(e, spot)}
+              delay={i}
+            />))}
         </div>
       </div>
 
